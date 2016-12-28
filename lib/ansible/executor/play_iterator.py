@@ -24,6 +24,7 @@ import fnmatch
 from ansible.compat.six import iteritems
 from ansible import constants as C
 from ansible.errors import AnsibleError
+from ansible.module_utils.six import cmp
 from ansible.playbook.block import Block
 from ansible.playbook.task import Task
 from ansible.playbook.role_include import IncludeRole
@@ -48,6 +49,7 @@ class HostState:
         self.cur_rescue_task    = 0
         self.cur_always_task    = 0
         self.cur_role           = None
+        self.cur_role_task      = None
         self.cur_dep_chain      = None
         self.run_state          = PlayIterator.ITERATING_SETUP
         self.fail_state         = PlayIterator.FAILED_NONE
@@ -120,6 +122,7 @@ class HostState:
         new_state.cur_rescue_task = self.cur_rescue_task
         new_state.cur_always_task = self.cur_always_task
         new_state.cur_role = self.cur_role
+        new_state.cur_role_task = self.cur_role_task
         new_state.run_state = self.run_state
         new_state.fail_state = self.fail_state
         new_state.pending_setup = self.pending_setup
@@ -276,12 +279,31 @@ class PlayIterator:
                 parent = parent._parent
             return False
 
+        def _role_task_cmp(tt):
+            '''
+            tt is a tuple made of the regular/rescue/always task number
+            from the current state of the host.
+            '''
+            if not s.cur_role_task:
+                return 1
+            res = cmp(tt[0], s.cur_role_task[0])
+            if res == 0:
+                res = cmp(tt[1], s.cur_role_task[1])
+                if res == 0:
+                    res = cmp(tt[2], s.cur_role_task[2])
+            return res
+
         if task and task._role:
             # if we had a current role, mark that role as completed
-            if s.cur_role and _roles_are_different(task._role, s.cur_role) and host.name in s.cur_role._had_task_run and \
-               not _role_is_child(s.cur_role) and not peek:
-                s.cur_role._completed[host.name] = True
+            if s.cur_role:
+                role_diff  = _roles_are_different(task._role, s.cur_role)
+                role_child = _role_is_child(s.cur_role)
+                tasks_cmp  = _role_task_cmp((s.cur_regular_task, s.cur_rescue_task, s.cur_always_task))
+                host_done  = host.name in s.cur_role._had_task_run
+                if (role_diff or (not role_diff and tasks_cmp <= 0)) and host_done and not role_child and not peek:
+                    s.cur_role._completed[host.name] = True
             s.cur_role = task._role
+            s.cur_role_task = (s.cur_regular_task, s.cur_rescue_task, s.cur_always_task)
             s.cur_dep_chain = task.get_dep_chain()
 
         if not peek:
