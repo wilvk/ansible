@@ -183,8 +183,6 @@ class Ec2LaunchConfigurationServiceManager(object):
 
 
     def create_block_device(self, module, volume):
-        # Not aware of a way to determine this programatically
-        # http://aws.amazon.com/about-aws/whats-new/2013/10/09/ebs-provisioned-iops-maximum-iops-gb-ratio-increased-to-30-1/
         MAX_IOPS_TO_SIZE_RATIO = 30
         if 'snapshot' not in volume and 'ephemeral' not in volume:
             if 'volume_size' not in volume:
@@ -273,29 +271,26 @@ class Ec2LaunchConfigurationServiceManager(object):
             'PlacementTenancy': placement_tenancy
         }
     
-        launch_configs_response = connection.describe_launch_configurations(LaunchConfigurationNames=[name])
+        launch_configs = connection.describe_launch_configurations(LaunchConfigurationNames=[name]).get('LaunchConfigurations')
         changed = False
-        if not launch_configs_response:
+        result = {}
+
+        if len(launch_configs) == 0:
             try:
                 connection.create_launch_configuration(launch_config)
-                launch_configs_response = connection.describe_launch_configurations(LaunchConfigurationNames=[name])
+                launch_configs = connection.describe_launch_configurations(LaunchConfigurationNames=[name]).get('LaunchConfigurations')
                 changed = True
-            except BotoServerError as e:
+            except botocore.exceptions.ClientError as e:
                 module.fail_json(msg=str(e))
-    
-        launch_configs = launch_configs_response.get('LaunchConfigurations')
 
-        result = dict(
-                     ((a[0], a[1]) for a in launch_configs[0].items()
-                      if a[0] not in ('connection', 'created_time', 'instance_monitoring', 'block_device_mappings'))
-            )
+        if len(launch_configs) > 0:
+            result = dict(
+                         ((a[0], a[1]) for a in launch_configs[0].items()
+                          if a[0] not in ('connection', 'created_time', 'instance_monitoring', 'block_device_mappings'))
+                )
+
         result['CreatedTime'] = str(launch_configs[0].get('CreatedTime'))
 
-        # Looking at boto's launchconfig.py, it looks like this could be a boolean
-        # value or an object with an enabled attribute.  The enabled attribute
-        # could be a boolean or a string representation of a boolean.  Since
-        # I can't test all permutations myself to see if my reading of the code is
-        # correct, have to code this *very* defensively
         if launch_configs[0].get('InstanceMonitoring') is True:
             result['InstanceMonitoring'] = True
         else:
@@ -327,9 +322,11 @@ class Ec2LaunchConfigurationServiceManager(object):
     
     def delete_launch_config(self, module):
         name = module.params.get('name')
-        launch_configs = connection.describe_launch_configurations(LaunchConfigurationNames=[name])
-        if launch_configs:
-            launch_configs[0].delete()
+        connection = self.client['autoscaling']
+        launch_configs = connection.describe_launch_configurations(LaunchConfigurationNames=[name]).get('LaunchConfigurations')
+        if launch_configs and len(launch_configs) > 0:
+            connection.delete_launch_configuration(
+                    LaunchConfigurationName=launch_configs[0].get('LaunchConfigurationName'))
             module.exit_json(changed=True)
         else:
             module.exit_json(changed=False)
