@@ -196,7 +196,7 @@ class Ec2LaunchConfigurationServiceManager(object):
             if 'snapshot' in volume:
                 module.fail_json(msg='Cannot set both ephemeral and snapshot')
         return {
-                VirtualName: volume.get('virtual_name'),
+                VirtualName: volume.get('ephemeral'),
                 DeviceName: volume.get('device_name'),
                 Ebs: {
                     SnapshotId: volume.get('snapshot'),
