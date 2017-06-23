@@ -141,8 +141,9 @@ EXAMPLES = '''
 '''
 import traceback
 
-from ansible.module_utils.basic import *
-from ansible.module_utils.ec2 import *
+#from ansible.module_utils.basic import *
+#from ansible.module_utils.ec2 import *
+from ansible.module_utils.ec2 import get_aws_connection_info, ec2_argument_spec, boto3_conn, HAS_BOTO3
 
 try:
     from boto.ec2.blockdevicemapping import BlockDeviceType, BlockDeviceMapping
@@ -153,135 +154,176 @@ try:
 except ImportError:
     HAS_BOTO = False
 
+try:
+    import botocore
+except:
+    pass
 
-def create_block_device(module, volume):
-    # Not aware of a way to determine this programatically
-    # http://aws.amazon.com/about-aws/whats-new/2013/10/09/ebs-provisioned-iops-maximum-iops-gb-ratio-increased-to-30-1/
-    MAX_IOPS_TO_SIZE_RATIO = 30
-    if 'snapshot' not in volume and 'ephemeral' not in volume:
-        if 'volume_size' not in volume:
-            module.fail_json(msg='Size must be specified when creating a new volume or modifying the root volume')
-    if 'snapshot' in volume:
-        if 'device_type' in volume and volume.get('device_type') == 'io1' and 'iops' not in volume:
-            module.fail_json(msg='io1 volumes must have an iops value set')
-    if 'ephemeral' in volume:
+
+class Ec2LaunchConfigurationServiceManager(object):
+    """Handles EC2 Launch Config Services"""
+
+    def __init__(self, module):
+        self.client = {}
+        self.module = module
+        self.create_client('autoscaling')
+        self.create_client('ec2')
+
+    def create_client(self, resource):
+        try:
+            region, ec2_url, aws_connect_kwargs = get_aws_connection_info(
+                self.module, boto3=True)
+            self.client[resource] = boto3_conn(self.module, conn_type='client',
+                                     resource=resource, region=region,
+                                     endpoint=ec2_url, **aws_connect_kwargs)
+        except botocore.exceptions.NoRegionError:
+            self.module.fail_json(
+                msg=("region must be specified as a parameter in "
+                     "AWS_DEFAULT_REGION environment variable or in "
+                     "boto configuration file"))
+        except botocore.exceptions.ClientError as e:
+            self.module.fail_json(
+                msg="unable to establish connection - " + str(e),
+                exception=traceback.format_exc(),
+                **camel_dict_to_snake_dict(e.response))
+
+
+    def create_block_device(module, volume):
+        # Not aware of a way to determine this programatically
+        # http://aws.amazon.com/about-aws/whats-new/2013/10/09/ebs-provisioned-iops-maximum-iops-gb-ratio-increased-to-30-1/
+        MAX_IOPS_TO_SIZE_RATIO = 30
+        if 'snapshot' not in volume and 'ephemeral' not in volume:
+            if 'volume_size' not in volume:
+                module.fail_json(msg='Size must be specified when creating a new volume or modifying the root volume')
         if 'snapshot' in volume:
-            module.fail_json(msg='Cannot set both ephemeral and snapshot')
-    return BlockDeviceType(snapshot_id=volume.get('snapshot'),
-                           ephemeral_name=volume.get('ephemeral'),
-                           size=volume.get('volume_size'),
-                           volume_type=volume.get('device_type'),
-                           delete_on_termination=volume.get('delete_on_termination', False),
-                           iops=volume.get('iops'))
+            if 'device_type' in volume and volume.get('device_type') == 'io1' and 'iops' not in volume:
+                module.fail_json(msg='io1 volumes must have an iops value set')
+        if 'ephemeral' in volume:
+            if 'snapshot' in volume:
+                module.fail_json(msg='Cannot set both ephemeral and snapshot')
+        return BlockDeviceType(snapshot_id=volume.get('snapshot'),
+                               ephemeral_name=volume.get('ephemeral'),
+                               size=volume.get('volume_size'),
+                               volume_type=volume.get('device_type'),
+                               delete_on_termination=volume.get('delete_on_termination', False),
+                               iops=volume.get('iops'))
+    
+   
+    def create_launch_config(module):
+        name = module.params.get('name')
+        image_id = module.params.get('image_id')
+        key_name = module.params.get('key_name')
+        security_groups = module.params['security_groups']
+        user_data = module.params.get('user_data')
+        instance_id = module.params.get('instance_id')
+        user_data_path = module.params.get('user_data_path')
+        volumes = module.params['volumes']
+        instance_type = module.params.get('instance_type')
+        spot_price = module.params.get('spot_price')
+        instance_monitoring = module.params.get('instance_monitoring')
+        assign_public_ip = module.params.get('assign_public_ip')
+        kernel_id = module.params.get('kernel_id')
+        ramdisk_id = module.params.get('ramdisk_id')
+        instance_profile_name = module.params.get('instance_profile_name')
+        ebs_optimized = module.params.get('ebs_optimized')
+        classic_link_vpc_id = module.params.get('classic_link_vpc_id')
+        classic_link_vpc_security_groups = module.params.get('classic_link_vpc_security_groups')
+        associate_public_ip_address = module.params.get('associate_public_ip_address')
+        placement_tenancy = module.params.get('placement_tenancy')
+        bdm = BlockDeviceMapping()
 
-
-def create_launch_config(connection, module):
-    name = module.params.get('name')
-    image_id = module.params.get('image_id')
-    key_name = module.params.get('key_name')
-    security_groups = module.params['security_groups']
-    user_data = module.params.get('user_data')
-    user_data_path = module.params.get('user_data_path')
-    volumes = module.params['volumes']
-    instance_type = module.params.get('instance_type')
-    spot_price = module.params.get('spot_price')
-    instance_monitoring = module.params.get('instance_monitoring')
-    assign_public_ip = module.params.get('assign_public_ip')
-    kernel_id = module.params.get('kernel_id')
-    ramdisk_id = module.params.get('ramdisk_id')
-    instance_profile_name = module.params.get('instance_profile_name')
-    ebs_optimized = module.params.get('ebs_optimized')
-    classic_link_vpc_id = module.params.get('classic_link_vpc_id')
-    classic_link_vpc_security_groups = module.params.get('classic_link_vpc_security_groups')
-    bdm = BlockDeviceMapping()
-
-    if user_data_path:
-        try:
-            with open(user_data_path, 'r') as user_data_file:
-                user_data = user_data_file.read()
-        except IOError as e:
-            module.fail_json(msg=str(e), exception=traceback.format_exc())
-
-    if volumes:
-        for volume in volumes:
-            if 'device_name' not in volume:
-                module.fail_json(msg='Device name must be set for volume')
-            # Minimum volume size is 1GB. We'll use volume size explicitly set to 0
-            # to be a signal not to create this volume
-            if 'volume_size' not in volume or int(volume['volume_size']) > 0:
-                bdm[volume['device_name']] = create_block_device(module, volume)
-
-    lc = LaunchConfiguration(
-        name=name,
-        image_id=image_id,
-        key_name=key_name,
-        security_groups=security_groups,
-        user_data=user_data,
-        block_device_mappings=[bdm],
-        instance_type=instance_type,
-        kernel_id=kernel_id,
-        spot_price=spot_price,
-        instance_monitoring=instance_monitoring,
-        associate_public_ip_address=assign_public_ip,
-        ramdisk_id=ramdisk_id,
-        instance_profile_name=instance_profile_name,
-        ebs_optimized=ebs_optimized,
-        classic_link_vpc_security_groups=classic_link_vpc_security_groups,
-        classic_link_vpc_id=classic_link_vpc_id,
-    )
-
-    launch_configs = connection.get_all_launch_configurations(names=[name])
-    changed = False
-    if not launch_configs:
-        try:
-            connection.create_launch_configuration(lc)
-            launch_configs = connection.get_all_launch_configurations(names=[name])
-            changed = True
-        except BotoServerError as e:
-            module.fail_json(msg=str(e))
-
-    result = dict(
-                 ((a[0], a[1]) for a in vars(launch_configs[0]).items()
-                  if a[0] not in ('connection', 'created_time', 'instance_monitoring', 'block_device_mappings'))
+        connection = self.client["autoscaling"]
+    
+        if user_data_path:
+            try:
+                with open(user_data_path, 'r') as user_data_file:
+                    user_data = user_data_file.read()
+            except IOError as e:
+                module.fail_json(msg=str(e), exception=traceback.format_exc())
+    
+        if volumes:
+            for volume in volumes:
+                if 'device_name' not in volume:
+                    module.fail_json(msg='Device name must be set for volume')
+                # Minimum volume size is 1GB. We'll use volume size explicitly set to 0
+                # to be a signal not to create this volume
+                if 'volume_size' not in volume or int(volume['volume_size']) > 0:
+                    bdm[volume['device_name']] = self.create_block_device(module, volume)
+    
+        lc = LaunchConfiguration(
+            name=name,
+            image_id=image_id,
+            key_name=key_name,
+            security_groups=security_groups,
+            user_data=user_data,
+            instance_id=instance_id,
+            block_device_mappings=[bdm],
+            instance_type=instance_type,
+            kernel_id=kernel_id,
+            spot_price=spot_price,
+            instance_monitoring=instance_monitoring,
+            associate_public_ip_address=assign_public_ip,
+            ramdisk_id=ramdisk_id,
+            iam_instance_profile=instance_profile_name,
+            ebs_optimized=ebs_optimized,
+            classic_link_vpc_security_groups=classic_link_vpc_security_groups,
+            classic_link_vpc_id=classic_link_vpc_id,
+            associate_public_ip_address=associate_public_ip_address,
+            placement_tenanacy=placement_tenancy
         )
-    result['created_time'] = str(launch_configs[0].created_time)
-    # Looking at boto's launchconfig.py, it looks like this could be a boolean
-    # value or an object with an enabled attribute.  The enabled attribute
-    # could be a boolean or a string representation of a boolean.  Since
-    # I can't test all permutations myself to see if my reading of the code is
-    # correct, have to code this *very* defensively
-    if launch_configs[0].instance_monitoring is True:
-        result['instance_monitoring'] = True
-    else:
-        try:
-            result['instance_monitoring'] = module.boolean(launch_configs[0].instance_monitoring.enabled)
-        except AttributeError:
-            result['instance_monitoring'] = False
-    if launch_configs[0].block_device_mappings is not None:
-        result['block_device_mappings'] = []
-        for bdm in launch_configs[0].block_device_mappings:
-            result['block_device_mappings'].append(dict(device_name=bdm.device_name, virtual_name=bdm.virtual_name))
-            if bdm.ebs is not None:
-                result['block_device_mappings'][-1]['ebs'] = dict(snapshot_id=bdm.ebs.snapshot_id, volume_size=bdm.ebs.volume_size)
-
-    if user_data_path:
-        result['user_data'] = "hidden" # Otherwise, we dump binary to the user's terminal
-
-    module.exit_json(changed=changed, name=result['name'], created_time=result['created_time'],
-                     image_id=result['image_id'], arn=result['launch_configuration_arn'],
-                     security_groups=result['security_groups'],
-                     instance_type=result['instance_type'],
-                     result=result)
-
-
-def delete_launch_config(connection, module):
-    name = module.params.get('name')
-    launch_configs = connection.get_all_launch_configurations(names=[name])
-    if launch_configs:
-        launch_configs[0].delete()
-        module.exit_json(changed=True)
-    else:
-        module.exit_json(changed=False)
+    
+        launch_configs = connection.describe_launch_configurations(launch_confguration_names=[name])
+        changed = False
+        if not launch_configs:
+            try:
+                connection.create_launch_configuration(lc)
+                launch_configs = connection.describe_launch_configurations(launch_configuration_names=[name])
+                changed = True
+            except BotoServerError as e:
+                module.fail_json(msg=str(e))
+    
+        result = dict(
+                     ((a[0], a[1]) for a in vars(launch_configs[0]).items()
+                      if a[0] not in ('connection', 'created_time', 'instance_monitoring', 'block_device_mappings'))
+            )
+        result['created_time'] = str(launch_configs[0].created_time)
+        # Looking at boto's launchconfig.py, it looks like this could be a boolean
+        # value or an object with an enabled attribute.  The enabled attribute
+        # could be a boolean or a string representation of a boolean.  Since
+        # I can't test all permutations myself to see if my reading of the code is
+        # correct, have to code this *very* defensively
+        if launch_configs[0].instance_monitoring is True:
+            result['instance_monitoring'] = True
+        else:
+            try:
+                result['instance_monitoring'] = module.boolean(launch_configs[0].instance_monitoring.enabled)
+            except AttributeError:
+                result['instance_monitoring'] = False
+        if launch_configs[0].block_device_mappings is not None:
+            result['block_device_mappings'] = []
+            for bdm in launch_configs[0].block_device_mappings:
+                result['block_device_mappings'].append(dict(device_name=bdm.device_name, virtual_name=bdm.virtual_name))
+                if bdm.ebs is not None:
+                    result['block_device_mappings'][-1]['ebs'] = dict(snapshot_id=bdm.ebs.snapshot_id, volume_size=bdm.ebs.volume_size)
+    
+        if user_data_path:
+            result['user_data'] = "hidden" # Otherwise, we dump binary to the user's terminal
+    
+        module.exit_json(changed=changed, name=result['name'], created_time=result['created_time'],
+                         image_id=result['image_id'], arn=result['launch_configuration_arn'],
+                         security_groups=result['security_groups'],
+                         instance_type=result['instance_type'],
+                         result=result)
+    
+    
+    def delete_launch_config(module):
+        name = module.params.get('name')
+        launch_configs = connection.describe_launch_configurations(launch_configuration_names=[name])
+        if launch_configs:
+            launch_configs[0].delete()
+            module.exit_json(changed=True)
+        else:
+            module.exit_json(changed=False)
 
 
 def main():
@@ -290,6 +332,7 @@ def main():
         dict(
             name=dict(required=True, type='str'),
             image_id=dict(type='str'),
+            instance_id=dict(type='str'),
             key_name=dict(type='str'),
             security_groups=dict(type='list'),
             user_data=dict(type='str'),
@@ -306,7 +349,9 @@ def main():
             instance_monitoring=dict(default=False, type='bool'),
             assign_public_ip=dict(type='bool'),
             classic_link_vpc_security_groups=dict(type='list'),
-            classic_link_vpc_id=dict(type='str')
+            classic_link_vpc_id=dict(type='str'),
+            associate_public_ip_address=dict(type='bool', default=False),
+            placement_tenancy=dict(type='str')
         )
     )
 
@@ -315,22 +360,14 @@ def main():
         mutually_exclusive = [['user_data', 'user_data_path']]
     )
 
-    if not HAS_BOTO:
-        module.fail_json(msg='boto required for this module')
-
-    region, ec2_url, aws_connect_params = get_aws_connection_info(module)
-
-    try:
-        connection = connect_to_aws(boto.ec2.autoscale, region, **aws_connect_params)
-    except (boto.exception.NoAuthHandlerFound, AnsibleAWSError) as e:
-        module.fail_json(msg=str(e))
+    service_mgr = Ec2LaunchConfigurationServiceManager(module)
 
     state = module.params.get('state')
 
     if state == 'present':
-        create_launch_config(connection, module)
+        service_mgr.create_launch_config(module)
     elif state == 'absent':
-        delete_launch_config(connection, module)
+        service_mgr.delete_launch_config(module)
 
 if __name__ == '__main__':
     main()
