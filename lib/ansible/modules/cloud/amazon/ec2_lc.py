@@ -220,6 +220,7 @@ class Ec2LaunchConfigurationServiceManager(object):
         instance_type = module.params.get('instance_type')
         spot_price = module.params.get('spot_price')
         instance_monitoring = module.params.get('instance_monitoring')
+        advanced_instance_monitoring = module.params.get('advanced_instance_monitoring')
         assign_public_ip = module.params.get('assign_public_ip')
         kernel_id = module.params.get('kernel_id')
         ramdisk_id = module.params.get('ramdisk_id')
@@ -230,7 +231,7 @@ class Ec2LaunchConfigurationServiceManager(object):
         associate_public_ip_address = module.params.get('associate_public_ip_address')
         placement_tenancy = module.params.get('placement_tenancy')
 
-        bdm = {}
+        bdm = None
 
         connection = self.client["autoscaling"]
     
@@ -254,28 +255,56 @@ class Ec2LaunchConfigurationServiceManager(object):
         changed = False
         result = {}
 
+        launch_config = {
+            'LaunchConfigurationName': name,
+            'ImageId': image_id,
+            'InstanceId': instance_id,
+            'InstanceType': instance_type,
+            'EbsOptimized': ebs_optimized,
+        }
+
+        if classic_link_vpc_id is not None:
+            launch_config['ClassicLinkVPCId'] = classic_link_vpc_id
+
+        if instance_monitoring:
+            launch_config['InstanceMonitoring'] = { 'Enabled': advanced_instance_monitoring }
+
+        if placement_tenancy is not None:
+            launch_config['PlacementTenancy'] = placement_tenancy
+
+        if classic_link_vpc_security_groups is not None:
+            launch_config['ClassicLinkVPCSecurityGroups'] = classic_link_vpc_security_groups
+
+        if key_name is not None:
+            launch_config['KeyName'] = key_name
+
+        if bdm is not None:
+            launch_config['BlockDeviceMappings'] = [ bdm ]
+
+        if security_groups is not None:
+            launch_config['SecurityGroups'] = security_groups
+
+        if kernel_id is not None:
+            launch_config['KernelId'] = kernel_id
+
+        if ramdisk_id is not None:
+            launch_config['RamdiskId'] = ramdisk_id
+
+        if instance_profile_name is not None:
+            launch_config['IamInstanceProfile'] = instance_profile_name
+
+        if spot_price is not None:
+            launch_config['SpotPrice'] = str(spot_price)
+
+        if assign_public_ip is not None:
+            launch_config['AssociatePublicIpAddress'] = assign_public_ip
+
+        if user_data is not None:
+            launch_config['UserData'] = user_data
+
         if len(launch_configs) == 0:
             try:
-                connection.create_launch_configuration(
-                    LaunchConfigurationName=name,
-                    ImageId=image_id,
-                    KeyName=Key_name,
-                    SecurityGroups=security_groups,
-                    ClassicLinkVPCId=classic_link_vpc_id,
-                    ClassicLinkVPCSecurityGroups=classic_link_vpc_security_groups,
-                    UserData=user_data,
-                    InstanceId=instance_id,
-                    InstanceType=instance_type,
-                    KernelId=kernel_id,
-                    RamdiskId=ramdisk_id,
-                    BlockDeviceMappings=[bdm],
-                    InstanceMonitoring=instance_monitoring,
-                    SpotPrice=spot_price,
-                    IamInstanceProfile=instance_profile_name,
-                    EbsOptimized=ebs_optimized,
-                    AssociatePublicIpAddress=assign_public_ip,
-                    PlacementTenancy=placement_tenancy
-                )
+                connection.create_launch_configuration(**launch_config)
                 launch_configs = connection.describe_launch_configurations(LaunchConfigurationNames=[name]).get('LaunchConfigurations')
                 changed = True
             except botocore.exceptions.ClientError as e:
@@ -351,6 +380,7 @@ def main():
             ebs_optimized=dict(default=False, type='bool'),
             associate_public_ip_address=dict(type='bool'),
             instance_monitoring=dict(default=False, type='bool'),
+            advanced_instance_monitoring=dict(default=False, type='bool'),
             assign_public_ip=dict(type='bool'),
             classic_link_vpc_security_groups=dict(type='list'),
             classic_link_vpc_id=dict(type='str'),
