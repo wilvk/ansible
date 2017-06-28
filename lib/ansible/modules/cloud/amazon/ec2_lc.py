@@ -250,34 +250,32 @@ class Ec2LaunchConfigurationServiceManager(object):
                 if 'volume_size' not in volume or int(volume['volume_size']) > 0:
                     bdm[volume['device_name']] = self.create_block_device(module, volume)
     
-        launch_config ={
-            'LaunchConfigurationName': name,
-            'ImageId': image_id,
-            'KeyName': key_name,
-            'SecurityGroups': security_groups,
-            'ClassicLinkVPCSecurityGroups': classic_link_vpc_security_groups,
-            'ClassicLinkVPCSecurityGroups': classic_link_vpc_id,
-            'UserData': user_data,
-            'InstanceId': instance_id,
-            'InstanceType': instance_type,
-            'KernelId': kernel_id,
-            'RamdiskId': ramdisk_id,
-            'BlockDeviceMappings': [bdm],
-            'InstanceMonitoring': instance_monitoring,
-            'SpotPrice': spot_price,
-            'IamInstanceProfile': instance_profile_name,
-            'EbsOptimized': ebs_optimized,
-            'AssociatePublicIpAddress': assign_public_ip,
-            'PlacementTenancy': placement_tenancy
-        }
-    
         launch_configs = connection.describe_launch_configurations(LaunchConfigurationNames=[name]).get('LaunchConfigurations')
         changed = False
         result = {}
 
         if len(launch_configs) == 0:
             try:
-                connection.create_launch_configuration(launch_config)
+                connection.create_launch_configuration(
+                    LaunchConfigurationName=name,
+                    ImageId=image_id,
+                    KeyName=Key_name,
+                    SecurityGroups=security_groups,
+                    ClassicLinkVPCId=classic_link_vpc_id,
+                    ClassicLinkVPCSecurityGroups=classic_link_vpc_security_groups,
+                    UserData=user_data,
+                    InstanceId=instance_id,
+                    InstanceType=instance_type,
+                    KernelId=kernel_id,
+                    RamdiskId=ramdisk_id,
+                    BlockDeviceMappings=[bdm],
+                    InstanceMonitoring=instance_monitoring,
+                    SpotPrice=spot_price,
+                    IamInstanceProfile=instance_profile_name,
+                    EbsOptimized=ebs_optimized,
+                    AssociatePublicIpAddress=assign_public_ip,
+                    PlacementTenancy=placement_tenancy
+                )
                 launch_configs = connection.describe_launch_configurations(LaunchConfigurationNames=[name]).get('LaunchConfigurations')
                 changed = True
             except botocore.exceptions.ClientError as e:
