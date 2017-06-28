@@ -194,20 +194,19 @@ class Ec2LaunchConfigurationServiceManager(object):
             if 'snapshot' in volume:
                 module.fail_json(msg='Cannot set both ephemeral and snapshot')
         return {
-                VirtualName: volume.get('ephemeral'),
-                DeviceName: volume.get('device_name'),
-                Ebs: {
-                    SnapshotId: volume.get('snapshot'),
-                    VolumeSize: volume.get('volume_size'),
-                    VolumeType: volume.get('device_type'),
-                    DeleteOnTermination: volume.get('delete_on_termination', False),
-                    Iops: volume.get('iops'),
-                    Encrypted: volume.get('encrypted')
+                'VirtualName': volume.get('ephemeral'),
+                'DeviceName': volume.get('device_name'),
+                'Ebs': {
+                    'SnapshotId': volume.get('snapshot'),
+                    'VolumeSize': volume.get('volume_size'),
+                    'VolumeType': volume.get('device_type'),
+                    'DeleteOnTermination': volume.get('delete_on_termination', False),
+                    'Iops': volume.get('iops'),
+                    'Encrypted': volume.get('encrypted')
                 },
-                NoDevice: volume.get('no_device')
+                'NoDevice': volume.get('no_device')
             }
-    
-   
+
     def create_launch_config(self, module):
         name = module.params.get('name')
         image_id = module.params.get('image_id')
