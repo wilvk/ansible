@@ -193,19 +193,40 @@ class Ec2LaunchConfigurationServiceManager(object):
         if 'ephemeral' in volume:
             if 'snapshot' in volume:
                 module.fail_json(msg='Cannot set both ephemeral and snapshot')
-        return {
-                'VirtualName': volume.get('ephemeral'),
-                'DeviceName': volume.get('device_name'),
-                'Ebs': {
-                    'SnapshotId': volume.get('snapshot'),
-                    'VolumeSize': volume.get('volume_size'),
-                    'VolumeType': volume.get('device_type'),
-                    'DeleteOnTermination': volume.get('delete_on_termination', False),
-                    'Iops': volume.get('iops'),
-                    'Encrypted': volume.get('encrypted')
-                },
-                'NoDevice': volume.get('no_device')
-            }
+
+        return_object = {}
+
+        if 'ephemeral' in volume:
+            return_object['VirtualName'] = volume.get('ephemeral')
+
+        if 'device_name' in volume:
+            return_object['DeviceName'] = volume.get('device_name')
+
+        if 'no_device' is volume:
+            return_object['NoDevice'] = volume.get('no_device')
+
+        if any(key in volume for key in ['snapshot', 'volume_size', 'volume_type', 'delete_on_termination', 'ips', 'encrypted']):
+            return_object['Ebs'] = {}
+
+        if 'snapshot' in volume:
+            return_object['Ebs']['SnapshotId'] = volume.get('snapshot')
+
+        if 'volume_size' in volume:
+            return_object['Ebs']['VolumeSize'] = volume.get('volume_size')
+
+        if 'volume_type' in volume:
+            return_object['Ebs']['VolumeType'] = volume.get('volume_type')
+
+        if 'delete_on_termination' in volume:
+            return_object['Ebs']['DeleteOnTermination'] = volume.get('delete_on_termination', False)
+
+        if 'iops' in volume:
+            return_object['Ebs']['Iops'] = volume.get('iops')
+
+        if 'encrypted' in volume:
+            return_object['Ebs']['Encrypted'] = volume.get('encrypted')
+
+        return return_object
 
     def create_launch_config(self, module):
         name = module.params.get('name')
@@ -230,7 +251,7 @@ class Ec2LaunchConfigurationServiceManager(object):
         associate_public_ip_address = module.params.get('associate_public_ip_address')
         placement_tenancy = module.params.get('placement_tenancy')
 
-        bdm = None
+        bdm = {}
 
         connection = self.client["autoscaling"]
     
@@ -248,7 +269,7 @@ class Ec2LaunchConfigurationServiceManager(object):
                 # Minimum volume size is 1GB. We'll use volume size explicitly set to 0
                 # to be a signal not to create this volume
                 if 'volume_size' not in volume or int(volume['volume_size']) > 0:
-                    bdm[volume['device_name']] = self.create_block_device(module, volume)
+                    bdm.update(self.create_block_device(module, volume))
     
         launch_configs = connection.describe_launch_configurations(LaunchConfigurationNames=[name]).get('LaunchConfigurations')
         changed = False
@@ -257,10 +278,12 @@ class Ec2LaunchConfigurationServiceManager(object):
         launch_config = {
             'LaunchConfigurationName': name,
             'ImageId': image_id,
-            'InstanceId': instance_id,
             'InstanceType': instance_type,
             'EbsOptimized': ebs_optimized,
         }
+
+        if instance_id is not None:
+            launch_config['InstanceId'] = instance_id
 
         if classic_link_vpc_id is not None:
             launch_config['ClassicLinkVPCId'] = classic_link_vpc_id
@@ -328,7 +351,7 @@ class Ec2LaunchConfigurationServiceManager(object):
             result['BlockDeviceMappings'] = []
             for bdm in launch_configs[0].get('BlockDeviceMappings'):
                 result['BlockDeviceMappings'].append(dict(device_name=bdm.get('DeviceName'), virtual_name=bdm.get('VirtualName')))
-                if bdm.ebs is not None:
+                if bdm.get('Ebs') is not None:
                     result['BlockDeviceMappings'][-1]['ebs'] = dict(snapshot_id=bdm.get('Ebs').get('SnapshotId'), volume_size=bdm.get('Ebs').get('VolumeSize'))
     
         if user_data_path:
