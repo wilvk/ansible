@@ -125,6 +125,9 @@ requirements:
 """
 
 EXAMPLES = '''
+
+# create a launch configuration using an AMI image and instance type as a basis
+
 - ec2_lc:
     name: special
     image_id: ami-XXX
@@ -139,6 +142,20 @@ EXAMPLES = '''
       delete_on_termination: true
     - device_name: /dev/sdb
       ephemeral: ephemeral0
+
+# create a launch configuration using a running instance id as a basis
+
+- ec2_lc:
+    name: special
+    instance_id: i-00a48b207ec59e948
+    key_name: default
+    security_groups: ['launch-wizard-2' ]
+    volumes:
+    - device_name: /dev/sda1
+      volume_size: 120
+      device_type: io1
+      iops: 3000
+      delete_on_termination: true
 
 '''
 
@@ -162,7 +179,6 @@ class Ec2LaunchConfigurationServiceManager(object):
         self.client = {}
         self.module = module
         self.create_client('autoscaling')
-        self.create_client('ec2')
 
     def create_client(self, resource):
         try:
@@ -278,10 +294,14 @@ class Ec2LaunchConfigurationServiceManager(object):
 
         launch_config = {
             'LaunchConfigurationName': name,
-            'ImageId': image_id,
-            'InstanceType': instance_type,
             'EbsOptimized': ebs_optimized,
         }
+
+        if image_id is not None:
+            launch_config['image_id'] = image_id
+
+        if instance_type is not None:
+            launch_config['instance_type'] = instance_type
 
         if instance_id is not None:
             launch_config['InstanceId'] = instance_id
