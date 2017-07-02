@@ -148,6 +148,7 @@ from ansible.module_utils.ec2 import (get_aws_connection_info,
                                       boto3_conn, HAS_BOTO3)
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.ec2 import camel_dict_to_snake_dict
+
 try:
     import botocore
 except:
@@ -168,8 +169,8 @@ class Ec2LaunchConfigurationServiceManager(object):
             region, ec2_url, aws_connect_kwargs = get_aws_connection_info(
                 self.module, boto3=True)
             self.client[resource] = boto3_conn(self.module, conn_type='client',
-                                     resource=resource, region=region,
-                                     endpoint=ec2_url, **aws_connect_kwargs)
+                                               resource=resource, region=region,
+                                               endpoint=ec2_url, **aws_connect_kwargs)
         except botocore.exceptions.NoRegionError:
             self.module.fail_json(
                 msg=("region must be specified as a parameter in "
@@ -180,7 +181,6 @@ class Ec2LaunchConfigurationServiceManager(object):
                 msg="unable to establish connection - " + str(e),
                 exception=traceback.format_exc(),
                 **camel_dict_to_snake_dict(e.response))
-
 
     def create_block_device(self, module, volume):
         MAX_IOPS_TO_SIZE_RATIO = 30
@@ -205,7 +205,8 @@ class Ec2LaunchConfigurationServiceManager(object):
         if 'no_device' is volume:
             return_object['NoDevice'] = volume.get('no_device')
 
-        if any(key in volume for key in ['snapshot', 'volume_size', 'volume_type', 'delete_on_termination', 'ips', 'encrypted']):
+        if any(key in volume for key in ['snapshot', 'volume_size',
+               'volume_type', 'delete_on_termination', 'ips', 'encrypted']):
             return_object['Ebs'] = {}
 
         if 'snapshot' in volume:
@@ -254,14 +255,14 @@ class Ec2LaunchConfigurationServiceManager(object):
         bdm = {}
 
         connection = self.client["autoscaling"]
-    
+
         if user_data_path:
             try:
                 with open(user_data_path, 'r') as user_data_file:
                     user_data = user_data_file.read()
             except IOError as e:
                 module.fail_json(msg=str(e), exception=traceback.format_exc())
-    
+
         if volumes:
             for volume in volumes:
                 if 'device_name' not in volume:
@@ -270,7 +271,7 @@ class Ec2LaunchConfigurationServiceManager(object):
                 # to be a signal not to create this volume
                 if 'volume_size' not in volume or int(volume['volume_size']) > 0:
                     bdm.update(self.create_block_device(module, volume))
-    
+
         launch_configs = connection.describe_launch_configurations(LaunchConfigurationNames=[name]).get('LaunchConfigurations')
         changed = False
         result = {}
@@ -289,7 +290,7 @@ class Ec2LaunchConfigurationServiceManager(object):
             launch_config['ClassicLinkVPCId'] = classic_link_vpc_id
 
         if instance_monitoring:
-            launch_config['InstanceMonitoring'] = { 'Enabled': advanced_instance_monitoring }
+            launch_config['InstanceMonitoring'] = {'Enabled': advanced_instance_monitoring}
 
         if placement_tenancy is not None:
             launch_config['PlacementTenancy'] = placement_tenancy
@@ -301,7 +302,7 @@ class Ec2LaunchConfigurationServiceManager(object):
             launch_config['KeyName'] = key_name
 
         if bdm is not None:
-            launch_config['BlockDeviceMappings'] = [ bdm ]
+            launch_config['BlockDeviceMappings'] = [bdm]
 
         if security_groups is not None:
             launch_config['SecurityGroups'] = security_groups
@@ -336,7 +337,7 @@ class Ec2LaunchConfigurationServiceManager(object):
             result = dict(
                          ((a[0], a[1]) for a in launch_configs[0].items()
                           if a[0] not in ('connection', 'created_time', 'instance_monitoring', 'block_device_mappings'))
-                )
+            )
 
         result['CreatedTime'] = str(launch_configs[0].get('CreatedTime'))
 
@@ -353,29 +354,29 @@ class Ec2LaunchConfigurationServiceManager(object):
                 result['BlockDeviceMappings'].append(dict(device_name=bdm.get('DeviceName'), virtual_name=bdm.get('VirtualName')))
                 if bdm.get('Ebs') is not None:
                     result['BlockDeviceMappings'][-1]['ebs'] = dict(snapshot_id=bdm.get('Ebs').get('SnapshotId'), volume_size=bdm.get('Ebs').get('VolumeSize'))
-    
+
         if user_data_path:
-            result['UserData'] = "hidden" # Otherwise, we dump binary to the user's terminal
+            result['UserData'] = "hidden"
 
         return_object = {
-                'Name': result.get('LaunchConfigurationName'),
-                'created_time': result.get('CreatedTime'),
-                'ImageId': result.get('ImageId'),
-                'Arn': result.get('LaunchConfigurationARN'),
-                'SecurityGroups': result.get('SecurityGroups'),
-                'InstanceType': result.get('InstanceType'),
-                'Result': result
-            }
-    
+            'Name': result.get('LaunchConfigurationName'),
+            'created_time': result.get('CreatedTime'),
+            'ImageId': result.get('ImageId'),
+            'Arn': result.get('LaunchConfigurationARN'),
+            'SecurityGroups': result.get('SecurityGroups'),
+            'InstanceType': result.get('InstanceType'),
+            'Result': result
+        }
+
         module.exit_json(changed=changed, **camel_dict_to_snake_dict(return_object))
-    
+
     def delete_launch_config(self, module):
         name = module.params.get('name')
         connection = self.client['autoscaling']
         launch_configs = connection.describe_launch_configurations(LaunchConfigurationNames=[name]).get('LaunchConfigurations')
         if launch_configs and len(launch_configs) > 0:
             connection.delete_launch_configuration(
-                    LaunchConfigurationName=launch_configs[0].get('LaunchConfigurationName'))
+                LaunchConfigurationName=launch_configs[0].get('LaunchConfigurationName'))
             module.exit_json(changed=True)
         else:
             module.exit_json(changed=False)
@@ -412,7 +413,7 @@ def main():
 
     module = AnsibleModule(
         argument_spec=argument_spec,
-        mutually_exclusive = [['user_data', 'user_data_path']]
+        mutually_exclusive=[['user_data', 'user_data_path']]
     )
 
     service_mgr = Ec2LaunchConfigurationServiceManager(module)
@@ -420,11 +421,11 @@ def main():
     state = module.params.get('state')
     result = {}
 
-
     if state == 'present':
         result = service_mgr.create_launch_config(module)
     elif state == 'absent':
         service_mgr.delete_launch_config(module)
+
 
 if __name__ == '__main__':
     main()
